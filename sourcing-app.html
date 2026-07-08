@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Laylatopia Sourcing</title>
+<style>
+:root{
+  --bg:#faf8f4; --surface:#ffffff; --border:#e5e1d8; --border-strong:#d4cfc2;
+  --text:#2c2c2a; --text-secondary:#5f5e5a; --text-muted:#888780;
+  --accent:#185fa5; --success:#3b6d11; --success-bg:#eaf3de;
+  --danger:#a32d2d; --danger-bg:#fcebeb; --radius:10px;
+}
+*{box-sizing:border-box;}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);padding-bottom:74px;}
+.screen{padding:16px;max-width:480px;margin:0 auto;}
+h1{font-size:20px;font-weight:600;margin:4px 0 16px;text-align:center;}
+h2{font-size:16px;font-weight:600;margin:20px 0 10px;}
+h3{font-size:14px;font-weight:600;margin:14px 0 6px;color:var(--text-secondary);}
+label{font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px;margin-top:12px;}
+select,input,textarea{width:100%;padding:10px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);font-size:15px;background:var(--surface);color:var(--text);}
+button{width:100%;padding:12px;border-radius:var(--radius);border:1px solid var(--border-strong);background:var(--surface);font-size:15px;font-weight:600;margin-top:16px;color:var(--text);}
+button.primary{background:var(--accent);color:#fff;border:none;}
+button.small{width:auto;padding:8px 14px;font-size:13px;font-weight:500;margin-top:0;}
+button.danger-text{color:var(--danger);}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px;}
+.row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:14px;}
+.row .muted{color:var(--text-secondary);}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;}
+.result-box{border-radius:var(--radius);padding:14px;}
+.result-box.good{background:var(--success-bg);color:var(--success);}
+.result-box.bad{background:var(--danger-bg);color:var(--danger);}
+.result-box p{margin:0;}
+.result-box .pct{font-size:24px;font-weight:700;margin:4px 0;}
+.result-box .label{font-size:12px;}
+.result-box.primary-gate{border:2px solid currentColor;}
+.breakdown{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-top:14px;font-size:13px;}
+nav{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);display:flex;justify-content:space-around;padding:8px 0 max(8px, env(safe-area-inset-bottom));}
+nav button{all:unset;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;color:var(--text-muted);cursor:pointer;padding:4px 8px;}
+nav button.active{color:var(--accent);}
+.empty{text-align:center;color:var(--text-muted);font-size:14px;padding:30px 0;}
+.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500;}
+.tag.good{background:var(--success-bg);color:var(--success);}
+.tag.bad{background:var(--danger-bg);color:var(--danger);}
+.top-actions{display:flex;gap:8px;margin-bottom:14px;}
+.top-actions button{margin-top:0;}
+.subtle{font-size:12px;color:var(--text-muted);margin-top:4px;}
+hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<nav id="bottomNav"></nav>
+<script>
+const DEFAULT_SETTINGS = {
+  proteins:["Kangaroo","Camel","Alpaca","Yak","Seal","Salmon","Venison","Wagyu","Bison","Buffalo","Emu","Ostrich","Rabbit","Duck","Turkey","Goose","Pheasant"],
+  productTypes:["Muscle meat","Ground","Organs","Chews"],
+  costUnits:["Per pound","Per kilogram","Per item"],
+  batchRatios:{
+    "Muscle meat":{rawQty:10, rawUnit:"lb", bags:11},
+    "Ground":{rawQty:2, rawUnit:"lb", bags:3},
+    "Organs":{rawQty:10, rawUnit:"lb", bags:11},
+    "Chews":{rawQty:1, rawUnit:"item", bags:1}
+  },
+  packagingCost:2.66, laborProduction:0.64, laborEvents:1.65,
+  ecomShipping:15,
+  marginTargetVendor:60, marginTargetEcom:40
+};
+function loadAll(){ try{ const raw=localStorage.getItem('laylatopia_data'); return raw?JSON.parse(raw):null; }catch(e){ return null; } }
+let DB = loadAll() || {settings:JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), quotes:[], suppliers:[], boxes:[], inventory:[], receipts:[]};
+if(!DB.settings) DB.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+if(!DB.settings.batchRatios) DB.settings.batchRatios = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.batchRatios));
+if(!DB.settings.costUnits) DB.settings.costUnits = DEFAULT_SETTINGS.costUnits;
+if(!DB.settings.ecomShipping) DB.settings.ecomShipping = 15;
+function save(){ localStorage.setItem('laylatopia_data', JSON.stringify(DB)); }
+function fmtMoney(n){ return '$'+(Math.round((n||0)*100)/100).toFixed(2); }
+function fmtPct(n){ return (Math.round((n||0)*10)/10)+'%'; }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function esc(s){ return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const KG_TO_LB = 2.20462;
+
+function calcRawCostInLbs(costUnit, costAmount, qty){
+  // Returns {rawCostTotal, rawLbs}
+  if(costUnit === 'Per pound'){
+    return { rawCostTotal: costAmount*qty, rawLbs: qty };
+  } else if(costUnit === 'Per kilogram'){
+    const lbs = qty * KG_TO_LB;
+    return { rawCostTotal: costAmount*qty, rawLbs: lbs };
+  } else { // Per item
+    return { rawCostTotal: costAmount*qty, rawLbs: null, rawItems: qty };
+  }
+}
+function calcQuote(protein, productType, costUnit, costAmount, qty, sellPrice){
+  const s = DB.settings;
+  const ratio = s.batchRatios[productType] || s.batchRatios["Muscle meat"];
+  const raw = calcRawCostInLbs(costUnit, costAmount, qty);
+  let bagsProduced;
+  if(productType === 'Chews' || costUnit === 'Per item'){
+    bagsProduced = qty * (ratio.bags/ratio.rawQty);
+  } else {
+    bagsProduced = raw.rawLbs * (ratio.bags / ratio.rawQty);
+  }
+  if(bagsProduced <= 0) bagsProduced = 1;
+  const rawCostPerBag = raw.rawCostTotal / bagsProduced;
+  const packaging = s.packagingCost;
+  const laborVendor = s.laborEvents;
+  const laborEcom = s.laborProduction;
+  const costVendor = rawCostPerBag + packaging + laborVendor;
+  const costEcom = rawCostPerBag + packaging + laborEcom; // customer pays shipping, not added to your cost
+  const vendorMargin = sellPrice>0 ? ((sellPrice-costVendor)/sellPrice)*100 : 0;
+  const ecomMargin = sellPrice>0 ? ((sellPrice-costEcom)/sellPrice)*100 : 0;
+  const beVendor = costVendor/(1-s.marginTargetVendor/100);
+  const beEcom = costEcom/(1-s.marginTargetEcom/100);
+  return {
+    rawCostTotal: raw.rawCostTotal, bagsProduced, rawCostPerBag, packaging,
+    laborVendor, laborEcom, costVendor, costEcom, vendorMargin, ecomMargin,
+    vendorGood: vendorMargin >= s.marginTargetVendor, ecomGood: ecomMargin >= s.marginTargetEcom,
+    beVendor, beEcom
+  };
+}
+
+const TABS = [
+  {id:'price', label:'Price check', icon:'tag'},
+  {id:'suppliers', label:'Suppliers', icon:'store'},
+  {id:'inventory', label:'Inventory', icon:'box'},
+  {id:'receipts', label:'Receipts', icon:'receipt'},
+  {id:'reports', label:'Reports', icon:'chart'},
+  {id:'settings', label:'Settings', icon:'settings'}
+];
+const ICONS = {
+  tag:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41 11 3.83A2 2 0 0 0 9.59 3.24L4 3a1 1 0 0 0-1 1l.24 5.59a2 2 0 0 0 .59 1.41l9.58 9.58a2 2 0 0 0 2.83 0l4.35-4.35a2 2 0 0 0 0-2.83z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
+  store:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l1-5h16l1 5"/><path d="M4 9v10h16V9"/></svg>',
+  box:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>',
+  receipt:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+  chart:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>',
+  settings:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.36.19.77.3 1.51.33H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'
+};
+let currentTab = 'price';
+function renderNav(){
+  const nav = document.getElementById('bottomNav');
+  nav.innerHTML = TABS.map(t=>`<button data-tab="${t.id}" class="${t.id===currentTab?'active':''}">${ICONS[t.icon]}<span>${t.label}</span></button>`).join('');
+  nav.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{ currentTab=b.dataset.tab; render(); }));
+}
+function render(){
+  renderNav();
+  const app = document.getElementById('app');
+  if(currentTab==='price') app.innerHTML = renderPrice();
+  else if(currentTab==='suppliers') app.innerHTML = renderSuppliers();
+  else if(currentTab==='inventory') app.innerHTML = renderInventory();
+  else if(currentTab==='receipts') app.innerHTML = renderReceipts();
+  else if(currentTab==='reports') app.innerHTML = renderReports();
+  else if(currentTab==='settings') app.innerHTML = renderSettings();
+  attachHandlers();
+}
+
+// ---------------- PRICE CHECK ----------------
+let priceState = { protein:'', customProtein:'', productType:'Muscle meat', costUnit:'Per pound', costAmount:'', qty:'', sellPrice:'' };
+function renderPrice(){
+  const s = DB.settings;
+  const proteinOpts = s.proteins.map(p=>`<option ${priceState.protein===p?'selected':''}>${esc(p)}</option>`).join('') + `<option value="__custom__" ${priceState.protein==='__custom__'?'selected':''}>Type custom protein...</option>`;
+  const productOpts = s.productTypes.map(p=>`<option ${priceState.productType===p?'selected':''}>${esc(p)}</option>`).join('');
+  const unitOpts = s.costUnits.map(u=>`<option ${priceState.costUnit===u?'selected':''}>${esc(u)}</option>`).join('');
+  const qtyLabel = priceState.costUnit === 'Per item' ? 'How many items are you buying?' : (priceState.costUnit === 'Per kilogram' ? 'How many kilograms are you buying?' : 'How many pounds are you buying?');
+  let resultsHtml = '';
+  if(priceState.result){
+    const r = priceState.result;
+    resultsHtml = `
+      <div class="grid2">
+        <div class="result-box primary-gate ${r.vendorGood?'good':'bad'}">
+          <p class="label">Vendor event (primary)</p>
+          <p class="pct">${fmtPct(r.vendorMargin)}</p>
+          <p class="label">${r.vendorGood?'Yes, hits target':'No, below '+s.marginTargetVendor+'%'}</p>
+        </div>
+        <div class="result-box ${r.ecomGood?'good':'bad'}">
+          <p class="label">E-commerce</p>
+          <p class="pct">${fmtPct(r.ecomMargin)}</p>
+          <p class="label">${r.ecomGood?'Yes, hits target':'No, below '+s.marginTargetEcom+'%'}</p>
+        </div>
+      </div>
+      <div class="breakdown">
+        <div class="row"><span class="muted">Raw cost total</span><span>${fmtMoney(r.rawCostTotal)}</span></div>
+        <div class="row"><span class="muted">Estimated bags produced</span><span>${(Math.round(r.bagsProduced*10)/10)}</span></div>
+        <div class="row"><span class="muted">Raw cost per bag</span><span>${fmtMoney(r.rawCostPerBag)}</span></div>
+        <div class="row"><span class="muted">Packaging</span><span>${fmtMoney(r.packaging)}</span></div>
+        <div class="row"><span class="muted">Labor (vendor)</span><span>${fmtMoney(r.laborVendor)}</span></div>
+        <div class="row"><span class="muted">Labor (e-commerce)</span><span>${fmtMoney(r.laborEcom)}</span></div>
+        <hr>
+        <div class="row"><span style="font-weight:600;">Total cost per bag (vendor)</span><span style="font-weight:600;">${fmtMoney(r.costVendor)}</span></div>
+        <div class="row"><span style="font-weight:600;">Total cost per bag (e-commerce)</span><span style="font-weight:600;">${fmtMoney(r.costEcom)}</span></div>
+        <p class="subtle">Customer pays $${s.ecomShipping} shipping on e-commerce orders \u2014 not included in your cost.</p>
+      </div>
+      <div class="breakdown">
+        <div class="row"><span class="muted">Break-even price (vendor, ${s.marginTargetVendor}%)</span><span>${fmtMoney(r.beVendor)}</span></div>
+        <div class="row"><span class="muted">Break-even price (e-commerce, ${s.marginTargetEcom}%)</span><span>${fmtMoney(r.beEcom)}</span></div>
+      </div>
+      <button class="small" id="saveQuoteBtn" style="width:100%;margin-top:14px;">Save this quote</button>
+    `;
+  }
+  return `
+  <div class="screen">
+    <h1>Price check</h1>
+    <label>Protein type</label>
+    <select id="pt_protein">${proteinOpts}</select>
+    ${priceState.protein==='__custom__' ? `<input id="pt_customProtein" placeholder="Type protein name" value="${esc(priceState.customProtein)}" style="margin-top:8px;">` : ''}
+    <label>Product type</label>
+    <select id="pt_product">${productOpts}</select>
+    <label>Cost unit</label>
+    <select id="pt_unit">${unitOpts}</select>
+    <label>Price</label>
+    <input id="pt_cost" type="number" inputmode="decimal" placeholder="12.00" value="${priceState.costAmount}">
+    <label>${qtyLabel}</label>
+    <input id="pt_qty" type="number" inputmode="decimal" placeholder="10" value="${priceState.qty}">
+    <label>Ideal sell price</label>
+    <input id="pt_sell" type="number" inputmode="decimal" placeholder="35.00" value="${priceState.sellPrice}">
+    <button class="primary" id="calcBtn">Calculate</button>
+    ${resultsHtml}
+  </div>`;
+}
+function attachPriceHandlers(){
+  const p = document.getElementById('pt_protein'); if(!p) return;
+  p.addEventListener('change', e=>{ priceState.protein=e.target.value; render(); });
+  const cp = document.getElementById('pt_customProtein'); if(cp) cp.addEventListener('input', e=>priceState.customProtein=e.target.value);
+  document.getElementById('pt_product').addEventListener('change', e=>{ priceState.productType=e.target.value; });
+  document.getElementById('pt_unit').addEventListener('change', e=>{ priceState.costUnit=e.target.value; render(); });
+  document.getElementById('pt_cost').addEventListener('input', e=>priceState.costAmount=e.target.value);
+  document.getElementById('pt_qty').addEventListener('input', e=>priceState.qty=e.target.value);
+  document.getElementById('pt_sell').addEventListener('input', e=>priceState.sellPrice=e.target.value);
+  document.getElementById('calcBtn').addEventListener('click', ()=>{
+    priceState.productType = document.getElementById('pt_product').value;
+    priceState.costUnit = document.getElementById('pt_unit').value;
+    const costAmount = parseFloat(document.getElementById('pt_cost').value)||0;
+    const qty = parseFloat(document.getElementById('pt_qty').value)||0;
+    const sellPrice = parseFloat(document.getElementById('pt_sell').value)||0;
+    const proteinName = priceState.protein==='__custom__' ? (priceState.customProtein||'Custom') : priceState.protein;
+    priceState.result = calcQuote(proteinName, priceState.productType, priceState.costUnit, costAmount, qty, sellPrice);
+    priceState.result.proteinName = proteinName;
+    render();
+  });
+  const saveBtn = document.getElementById('saveQuoteBtn');
+  if(saveBtn) saveBtn.addEventListener('click', ()=>{
+    const r = priceState.result;
+    DB.quotes.push({
+      id: uid(), date: todayStr(), protein: r.proteinName, productType: priceState.productType,
+      sellPrice: parseFloat(document.getElementById('pt_sell').value)||0,
+      vendorMargin: r.vendorMargin, ecomMargin: r.ecomMargin,
+      accepted: r.vendorGood
+    });
+    save();
+    alert('Quote saved.');
+  });
+}
+
+// ---------------- SUPPLIERS ----------------
+let supplierState = { search:'', viewingId:null };
+function renderSuppliers(){
+  if(supplierState.viewingId){
+    const sup = DB.suppliers.find(s=>s.id===supplierState.viewingId);
+    if(!sup) supplierState.viewingId=null;
+    else {
+      const purchases = sup.purchases||[];
+      return `
+      <div class="screen">
+        <div class="top-actions"><button class="small" id="backSup">Back</button></div>
+        <h1>${esc(sup.name)}</h1>
+        <div class="card">
+          <label>Log a purchase</label>
+          <select id="supProtein">${DB.settings.proteins.map(p=>`<option>${esc(p)}</option>`).join('')}</select>
+          <input id="supPrice" type="number" placeholder="Price per pound" style="margin-top:8px;">
+          <input id="supDate" type="date" value="${todayStr()}" style="margin-top:8px;">
+          <button class="small" id="addPurchaseBtn" style="width:100%;">Add purchase</button>
+        </div>
+        <h2>Purchase history</h2>
+        ${purchases.length? purchases.slice().reverse().map(pu=>`
+          <div class="card"><div class="row"><span>${esc(pu.protein)}</span><span>${fmtMoney(pu.price)}/lb</span></div>
+          <div class="row"><span class="muted">${pu.date}</span></div></div>
+        `).join('') : '<div class="empty">No purchases logged yet.</div>'}
+      </div>`;
+    }
+  }
+  const filtered = DB.suppliers.filter(s=>s.name.toLowerCase().includes(supplierState.search.toLowerCase()));
+  return `
+  <div class="screen">
+    <h1>Suppliers</h1>
+    <input id="supSearch" placeholder="Search suppliers" value="${esc(supplierState.search)}">
+    <div class="card" style="margin-top:14px;">
+      <label>New supplier name</label>
+      <input id="newSupName" placeholder="e.g. Green Valley Ranch">
+      <button class="small" id="addSupBtn" style="width:100%;">Add supplier</button>
+    </div>
+    <h2>Your suppliers</h2>
+    ${filtered.length? filtered.map(s=>`
+      <div class="card" data-view="${s.id}">
+        <div class="row"><span style="font-weight:600;">${esc(s.name)}</span><span class="muted">${(s.purchases||[]).length} purchases</span></div>
+      </div>
+    `).join('') : '<div class="empty">No suppliers yet. Add one above.</div>'}
+  </div>`;
+}
+function attachSupplierHandlers(){
+  const back = document.getElementById('backSup');
+  if(back){ back.addEventListener('click', ()=>{ supplierState.viewingId=null; render(); }); return; }
+  const addPurchase = document.getElementById('addPurchaseBtn');
+  if(addPurchase){
+    addPurchase.addEventListener('click', ()=>{
+      const sup = DB.suppliers.find(s=>s.id===supplierState.viewingId);
+      const protein = document.getElementById('supProtein').value;
+      const price = parseFloat(document.getElementById('supPrice').value)||0;
+      const date = document.getElementById('supDate').value || todayStr();
+      sup.purchases = sup.purchases||[];
+      sup.purchases.push({id:uid(), protein, price, date});
+      save(); render();
+    });
+    return;
+  }
+  const search = document.getElementById('supSearch');
+  if(search) search.addEventListener('input', e=>{ supplierState.search=e.target.value; render(); });
+  const addBtn = document.getElementById('addSupBtn');
+  if(addBtn) addBtn.addEventListener('click', ()=>{
+    const name = document.getElementById('newSupName').value.trim();
+    if(!name) return;
+    DB.suppliers.push({id:uid(), name, purchases:[]});
+    save(); render();
+  });
+  document.querySelectorAll('[data-view]').forEach(el=>{
+    el.addEventListener('click', ()=>{ supplierState.viewingId = el.dataset.view; render(); });
+  });
+}
+
+// ---------------- INVENTORY (+ cost allocator) ----------------
+let invState = { boxCost:'', items:[] };
+function renderInventory(){
+  const itemsHtml = invState.items.map((it,idx)=>`
+    <div class="row"><span>${esc(it.name)} ${it.weight?('- '+it.weight+' lb'):'(no weight)'}</span>
+    <button class="small danger-text" data-rmitem="${idx}" style="margin:0;padding:4px 8px;">Remove</button></div>
+  `).join('');
+  let allocation = '';
+  if(invState.result){
+    allocation = `<div class="breakdown">${invState.result.map(r=>`<div class="row"><span>${esc(r.name)}</span><span>${fmtMoney(r.cost)}</span></div>`).join('')}</div>`;
+  }
+  const invItems = DB.inventory.length ? DB.inventory.map(i=>`
+    <div class="card"><div class="row"><span>${esc(i.name)}</span><span>${i.qty} on hand</span></div>
+    <div class="row"><span class="muted">Cost/unit</span><span>${fmtMoney(i.costPerUnit)}</span></div></div>
+  `).join('') : '<div class="empty">No finished product logged yet.</div>';
+  return `
+  <div class="screen">
+    <h1>Inventory</h1>
+    <h2>Cost allocator (mixed box)</h2>
+    <div class="card">
+      <label>Total box cost</label>
+      <input id="boxCost" type="number" placeholder="150.00" value="${invState.boxCost}">
+      <hr>
+      <label>Add organ/item</label>
+      <input id="itemName" placeholder="e.g. Yak tongue">
+      <input id="itemWeight" type="number" placeholder="Weight (lb) - leave blank if unknown" style="margin-top:8px;">
+      <button class="small" id="addItemBtn" style="width:100%;">Add item</button>
+      ${itemsHtml}
+      <button class="primary" id="allocateBtn">Calculate allocation</button>
+      ${allocation}
+    </div>
+    <h2>Finished product on hand</h2>
+    ${invItems}
+  </div>`;
+}
+function attachInventoryHandlers(){
+  const bc = document.getElementById('boxCost'); if(!bc) return;
+  bc.addEventListener('input', e=>invState.boxCost=e.target.value);
+  document.getElementById('addItemBtn').addEventListener('click', ()=>{
+    const name = document.getElementById('itemName').value.trim();
+    const weight = parseFloat(document.getElementById('itemWeight').value)||0;
+    if(!name) return;
+    invState.items.push({name, weight});
+    render();
+  });
+  document.querySelectorAll('[data-rmitem]').forEach(el=>{
+    el.addEventListener('click', ()=>{ invState.items.splice(parseInt(el.dataset.rmitem),1); render(); });
+  });
+  document.getElementById('allocateBtn').addEventListener('click', ()=>{
+    const totalCost = parseFloat(invState.boxCost)||0;
+    const items = invState.items;
+    if(!items.length) return;
+    const haveWeights = items.every(i=>i.weight>0);
+    let result;
+    if(haveWeights){
+      const totalW = items.reduce((a,i)=>a+i.weight,0);
+      result = items.map(i=>({name:i.name, cost: totalCost * (i.weight/totalW)}));
+    } else {
+      const each = totalCost / items.length;
+      result = items.map(i=>({name:i.name, cost: each}));
+    }
+    invState.result = result;
+    DB.boxes.push({id:uid(), date:todayStr(), totalCost, items, result});
+    save();
+    render();
+  });
+}
+
+// ---------------- RECEIPTS ----------------
+let receiptState = { desc:'', amount:'', category:'Raw materials', date: todayStr() };
+const EXPENSE_CATS = ['Raw materials','Packaging & labels','Production','Overhead','Labor'];
+function renderReceipts(){
+  const list = DB.receipts.length ? DB.receipts.slice().reverse().map(r=>`
+    <div class="card"><div class="row"><span style="font-weight:500;">${esc(r.desc)}</span><span>${fmtMoney(r.amount)}</span></div>
+    <div class="row"><span class="muted">${r.category}</span><span class="muted">${r.date}</span></div></div>
+  `).join('') : '<div class="empty">No receipts logged yet.</div>';
+  return `
+  <div class="screen">
+    <h1>Receipts</h1>
+    <div class="card">
+      <label>Description</label>
+      <input id="rDesc" placeholder="e.g. Pouches from ULINE" value="${esc(receiptState.desc)}">
+      <label>Amount</label>
+      <input id="rAmount" type="number" placeholder="45.00" value="${receiptState.amount}">
+      <label>Category</label>
+      <select id="rCategory">${EXPENSE_CATS.map(c=>`<option ${receiptState.category===c?'selected':''}>${c}</option>`).join('')}</select>
+      <label>Date</label>
+      <input id="rDate" type="date" value="${receiptState.date}">
+      <button class="primary" id="addReceiptBtn">Add receipt</button>
+    </div>
+    <h2>Logged receipts</h2>
+    ${list}
+  </div>`;
+}
+function attachReceiptHandlers(){
+  const btn = document.getElementById('addReceiptBtn'); if(!btn) return;
+  btn.addEventListener('click', ()=>{
+    const desc = document.getElementById('rDesc').value.trim();
+    const amount = parseFloat(document.getElementById('rAmount').value)||0;
+    const category = document.getElementById('rCategory').value;
+    const date = document.getElementById('rDate').value || todayStr();
+    if(!desc || !amount) return;
+    DB.receipts.push({id:uid(), desc, amount, category, date});
+    save();
+    receiptState = { desc:'', amount:'', category:'Raw materials', date: todayStr() };
+    render();
+  });
+}
+
+// ---------------- REPORTS ----------------
+function renderReports(){
+  const byCategory = {};
+  DB.receipts.forEach(r=>{ byCategory[r.category] = (byCategory[r.category]||0) + r.amount; });
+  const totalExpenses = Object.values(byCategory).reduce((a,b)=>a+b,0);
+  const byProtein = {};
+  DB.quotes.forEach(q=>{ if(!byProtein[q.protein]) byProtein[q.protein]={count:0, sum:0}; byProtein[q.protein].count++; byProtein[q.protein].sum += q.vendorMargin; });
+  return `
+  <div class="screen">
+    <h1>Reports</h1>
+    <h2>Expenses by category (tax)</h2>
+    ${Object.keys(byCategory).length? Object.entries(byCategory).map(([c,v])=>`
+      <div class="row"><span>${c}</span><span>${fmtMoney(v)}</span></div>
+    `).join('') + `<hr><div class="row"><span style="font-weight:600;">Total</span><span style="font-weight:600;">${fmtMoney(totalExpenses)}</span></div>`
+      : '<div class="empty">No receipts logged yet.</div>'}
+    <h2>Average margin by protein (vendor)</h2>
+    ${Object.keys(byProtein).length? Object.entries(byProtein).map(([p,v])=>`
+      <div class="row"><span>${p}</span><span>${fmtPct(v.sum/v.count)} (${v.count} quotes)</span></div>
+    `).join('') : '<div class="empty">No quotes saved yet.</div>'}
+    <button class="small" id="exportCsvBtn" style="width:100%;">Export receipts as CSV</button>
+  </div>`;
+}
+function attachReportHandlers(){
+  const btn = document.getElementById('exportCsvBtn'); if(!btn) return;
+  btn.addEventListener('click', ()=>{
+    let csv = 'Date,Description,Category,Amount\n';
+    DB.receipts.forEach(r=>{ csv += `${r.date},"${r.desc.replace(/"/g,'""')}",${r.category},${r.amount}\n`; });
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'receipts.csv'; a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+// ---------------- SETTINGS ----------------
+function renderSettings(){
+  const s = DB.settings;
+  return `
+  <div class="screen">
+    <h1>Settings</h1>
+    <h2>Margin targets</h2>
+    <label>Vendor event minimum margin % (primary)</label>
+    <input id="setVendorTarget" type="number" value="${s.marginTargetVendor}">
+    <label>E-commerce minimum margin %</label>
+    <input id="setEcomTarget" type="number" value="${s.marginTargetEcom}">
+    <h2>Packaging & labor (per pouch)</h2>
+    <label>Packaging total</label>
+    <input id="setPackaging" type="number" value="${s.packagingCost}">
+    <label>Labor - production (e-commerce)</label>
+    <input id="setLaborProd" type="number" value="${s.laborProduction}">
+    <label>Labor - vendor events</label>
+    <input id="setLaborEvents" type="number" value="${s.laborEvents}">
+    <label>E-commerce shipping (customer pays)</label>
+    <input id="setShipping" type="number" value="${s.ecomShipping}">
+    <h2>Batch yield ratios (by product type)</h2>
+    ${s.productTypes.map(pt=>{
+      const r = s.batchRatios[pt];
+      return `<h3>${pt}</h3>
+      <div class="grid2">
+        <div><label>Raw qty</label><input data-ratio-qty="${pt}" type="number" value="${r.rawQty}"></div>
+        <div><label>Bags produced</label><input data-ratio-bags="${pt}" type="number" value="${r.bags}"></div>
+      </div>`;
+    }).join('')}
+    <button class="primary" id="saveSettingsBtn">Save settings</button>
+  </div>`;
+}
+function attachSettingsHandlers(){
+  const btn = document.getElementById('saveSettingsBtn'); if(!btn) return;
+  btn.addEventListener('click', ()=>{
+    const s = DB.settings;
+    s.marginTargetVendor = parseFloat(document.getElementById('setVendorTarget').value)||s.marginTargetVendor;
+    s.marginTargetEcom = parseFloat(document.getElementById('setEcomTarget').value)||s.marginTargetEcom;
+    s.packagingCost = parseFloat(document.getElementById('setPackaging').value)||s.packagingCost;
+    s.laborProduction = parseFloat(document.getElementById('setLaborProd').value)||s.laborProduction;
+    s.laborEvents = parseFloat(document.getElementById('setLaborEvents').value)||s.laborEvents;
+    s.ecomShipping = parseFloat(document.getElementById('setShipping').value)||s.ecomShipping;
+    s.productTypes.forEach(pt=>{
+      const qtyEl = document.querySelector(`[data-ratio-qty="${pt}"]`);
+      const bagsEl = document.querySelector(`[data-ratio-bags="${pt}"]`);
+      if(qtyEl && bagsEl){
+        s.batchRatios[pt].rawQty = parseFloat(qtyEl.value)||s.batchRatios[pt].rawQty;
+        s.batchRatios[pt].bags = parseFloat(bagsEl.value)||s.batchRatios[pt].bags;
+      }
+    });
+    save();
+    alert('Settings saved.');
+  });
+}
+
+function attachHandlers(){
+  attachPriceHandlers();
+  attachSupplierHandlers();
+  attachInventoryHandlers();
+  attachReceiptHandlers();
+  attachReportHandlers();
+  attachSettingsHandlers();
+}
+render();
+</script>
+</body>
+</html>
